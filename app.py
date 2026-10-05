@@ -1,9 +1,10 @@
-# app.py - Dedicated Maya AI Brain Server
+# app.py - Dedicated Maya AI Brain Server (Anti-Sleep & Ultra-Fast)
 import os
 import re
 import asyncio
 import tempfile
 import aiohttp
+import logging
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
@@ -13,12 +14,18 @@ from gTTS import gTTS
 from pydub import AudioSegment
 from rapidfuzz import fuzz
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("MayaBrainServer")
+
 app = FastAPI(title="Maya AI Central Engine")
 
 # ==========================================
-# ⚙️ কনফিগারেশন (আপনার মেইন ডাটাবেসের সাথে কানেক্টেড)
+# ⚙️ কনফিগারেশন
 # ==========================================
 MONGO_URL = os.getenv("MONGO_URL", "mongodb+srv://MoviaXBot270:MoviaXBot270@cluster0.kbkpgt6.mongodb.net/?appName=Cluster0")
+# আপনার রেন্ডার অ্যাপের নিজস্ব লাইভ লিঙ্ক এখানে সেট করতে পারেন (যেমন: https://maya-brain.onrender.com)
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "")
+
 client = AsyncIOMotorClient(MONGO_URL)
 db = client['movie_database']
 
@@ -27,7 +34,34 @@ class ChatRequest(BaseModel):
     user_name: str
     user_text: str
 
+# ==========================================
+# ⏰ ২৪/৭ অলওয়েজ অন কিপ-অ্যালাইভ লুপ (Anti-Sleep Engine)
+# ==========================================
+async def keep_alive_self_ping():
+    """রেন্ডার যেন ১৫ মিনিট পর স্লিপে না যায়, সেজন্য প্রতি ৮ মিনিট পরপর সেলফ-পিং করবে"""
+    logger.info("⏰ Maya Keep-Alive Worker initialized.")
+    await asyncio.sleep(60) # সার্ভার বুট হওয়ার ১ মিনিট পর শুরু হবে
+    
+    while True:
+        try:
+            target_url = RENDER_EXTERNAL_URL or "http://127.0.0.1:8080/"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(target_url, timeout=10) as resp:
+                    if resp.status == 200:
+                        logger.info("💓 Self-Ping successful! Server is awake & active.")
+        except Exception as e:
+            logger.warning(f"Self-ping heartbeat warning: {e}")
+            
+        # প্রতি ৮ মিনিট (৪৮০ সেকেন্ড) পর পর পিং করবে
+        await asyncio.sleep(480)
+
+@app.on_event("startup")
+async def on_startup():
+    asyncio.create_task(keep_alive_self_ping())
+
+# ==========================================
 # 🔍 ডাটাবেসে রিয়েল-টাইম মুভি খোঁজা
+# ==========================================
 async def check_movie_availability(query: str):
     try:
         clean_q = re.sub(r"[^a-zA-Z0-9\s\u0980-\u09FF]", "", query).lower().strip()
@@ -55,7 +89,9 @@ async def check_movie_availability(query: str):
         pass
     return None
 
+# ==========================================
 # 🎙️ ভয়েস তৈরি ইঞ্জিন (MP3 -> Telegram OGG Opus)
+# ==========================================
 async def generate_voice_file(text: str) -> str:
     clean_text = re.sub(r"[^\w\s\u0980-\u09FF,!?]", "", text).strip()
     if not clean_text:
@@ -81,10 +117,14 @@ async def generate_voice_file(text: str) -> str:
 
     ogg_path = await loop.run_in_executor(None, _to_ogg, mp3_path)
     if os.path.exists(mp3_path):
-        os.unlink(mp3_path)
+        try: os.unlink(mp3_path)
+        except Exception: pass
+        
     return ogg_path
 
+# ==========================================
 # 🧠 বুদ্ধিমান চ্যাট ইঞ্জিন (মেমোরি + আনলিমিটেড ফ্রি AI)
+# ==========================================
 async def think_reply(user_id: int, user_name: str, user_text: str) -> str:
     matched_movie = await check_movie_availability(user_text)
 
@@ -111,7 +151,6 @@ User: {user_text}
 Maya:"""
 
     reply = None
-    # Pollinations AI ফ্রি ইঞ্জিন
     try:
         url = "https://text.pollinations.ai/"
         payload = {
@@ -152,7 +191,7 @@ Maya:"""
     return clean_reply
 
 # ==========================================
-# 🌐 API এন্ডপয়েন্ট (যা আপনার মেইন বটের সাথে কথা বলবে)
+# 🌐 API এন্ডপয়েন্টসমূহ
 # ==========================================
 @app.post("/api/maya/chat")
 async def maya_chat_api(req: ChatRequest):
@@ -167,7 +206,7 @@ async def maya_voice_api(req: ChatRequest, background_tasks: BackgroundTasks):
     if not ogg_file or not os.path.exists(ogg_file):
         raise HTTPException(status_code=500, detail="Voice generation failed")
 
-    # ফাইল পাঠানোর পর স্বয়ংক্রিয় ক্লিনআপ
+    # ফাইল পাঠানোর পর ব্যাকগ্রাউন্ডে স্বয়ংক্রিয় ডিলিট
     background_tasks.add_task(lambda p: os.unlink(p) if os.path.exists(p) else None, ogg_file)
     
     return FileResponse(
@@ -178,8 +217,9 @@ async def maya_voice_api(req: ChatRequest, background_tasks: BackgroundTasks):
 
 @app.get("/")
 def home():
-    return {"status": "Maya Brain is Active & Thinking 🧠"}
+    return {"status": "Maya Brain is Active & Thinking 🧠", "uptime": "24/7 Alive"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
