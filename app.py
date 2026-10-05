@@ -1,4 +1,4 @@
-# app.py - Dedicated Maya AI Brain Server (Anti-Sleep & Ultra-Fast)
+# app.py - Dedicated Maya AI Brain Server (Crash-Proof Edition)
 import os
 import re
 import asyncio
@@ -10,9 +10,21 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorClient
-from gTTS import gTTS
-from pydub import AudioSegment
 from rapidfuzz import fuzz
+
+# সেফ অডিও ইমপোর্ট (যাতে প্যাকেজ মিস হলেও সার্ভার কোনোদিন ক্র্যাশ না করে)
+try:
+    from gtts import gTTS
+except ImportError:
+    try:
+        from gTTS import gTTS
+    except ImportError:
+        gTTS = None
+
+try:
+    from pydub import AudioSegment
+except ImportError:
+    AudioSegment = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("MayaBrainServer")
@@ -23,7 +35,6 @@ app = FastAPI(title="Maya AI Central Engine")
 # ⚙️ কনফিগারেশন
 # ==========================================
 MONGO_URL = os.getenv("MONGO_URL", "mongodb+srv://MoviaXBot270:MoviaXBot270@cluster0.kbkpgt6.mongodb.net/?appName=Cluster0")
-# আপনার রেন্ডার অ্যাপের নিজস্ব লাইভ লিঙ্ক এখানে সেট করতে পারেন (যেমন: https://maya-brain.onrender.com)
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
 client = AsyncIOMotorClient(MONGO_URL)
@@ -35,12 +46,11 @@ class ChatRequest(BaseModel):
     user_text: str
 
 # ==========================================
-# ⏰ ২৪/৭ অলওয়েজ অন কিপ-অ্যালাইভ লুপ (Anti-Sleep Engine)
+# ⏰ ২৪/৭ কিপ-অ্যালাইভ লুপ (Anti-Sleep Engine)
 # ==========================================
 async def keep_alive_self_ping():
-    """রেন্ডার যেন ১৫ মিনিট পর স্লিপে না যায়, সেজন্য প্রতি ৮ মিনিট পরপর সেলফ-পিং করবে"""
     logger.info("⏰ Maya Keep-Alive Worker initialized.")
-    await asyncio.sleep(60) # সার্ভার বুট হওয়ার ১ মিনিট পর শুরু হবে
+    await asyncio.sleep(45)
     
     while True:
         try:
@@ -52,8 +62,7 @@ async def keep_alive_self_ping():
         except Exception as e:
             logger.warning(f"Self-ping heartbeat warning: {e}")
             
-        # প্রতি ৮ মিনিট (৪৮০ সেকেন্ড) পর পর পিং করবে
-        await asyncio.sleep(480)
+        await asyncio.sleep(480) # প্রতি ৮ মিনিট পরপর পিং
 
 @app.on_event("startup")
 async def on_startup():
@@ -93,6 +102,10 @@ async def check_movie_availability(query: str):
 # 🎙️ ভয়েস তৈরি ইঞ্জিন (MP3 -> Telegram OGG Opus)
 # ==========================================
 async def generate_voice_file(text: str) -> str:
+    if not gTTS or not AudioSegment:
+        logger.warning("Audio libraries not loaded. Bypassing voice generation.")
+        return None
+
     clean_text = re.sub(r"[^\w\s\u0980-\u09FF,!?]", "", text).strip()
     if not clean_text:
         clean_text = "আমি শুনতে পাচ্ছি বন্ধু!"
@@ -128,7 +141,6 @@ async def generate_voice_file(text: str) -> str:
 async def think_reply(user_id: int, user_name: str, user_text: str) -> str:
     matched_movie = await check_movie_availability(user_text)
 
-    # মেমোরি রিড
     history = await db.maya_memory.find({"user_id": user_id}).sort("created_at", -1).limit(4).to_list(4)
     history.reverse()
 
@@ -177,7 +189,6 @@ Maya:"""
 
     clean_reply = re.sub(r"[\*\_#]", "", reply).replace("Maya:", "").replace("মায়া:", "").strip()
 
-    # মেমোরিতে সংরক্ষণ
     try:
         await db.maya_memory.insert_one({
             "user_id": user_id,
@@ -204,9 +215,9 @@ async def maya_voice_api(req: ChatRequest, background_tasks: BackgroundTasks):
     ogg_file = await generate_voice_file(reply_text)
     
     if not ogg_file or not os.path.exists(ogg_file):
-        raise HTTPException(status_code=500, detail="Voice generation failed")
+        # যদি ভয়েস তৈরি কোনো কারণে ফেইল করে, তবে ক্র্যাশ না করে সরাসরি টেক্সট পাঠাবে
+        return {"reply": reply_text, "voice_available": False}
 
-    # ফাইল পাঠানোর পর ব্যাকগ্রাউন্ডে স্বয়ংক্রিয় ডিলিট
     background_tasks.add_task(lambda p: os.unlink(p) if os.path.exists(p) else None, ogg_file)
     
     return FileResponse(
