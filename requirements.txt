@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+motor
+aiohttp
+gTTS
+pydub
+rapidfuzz
+python-multipart
